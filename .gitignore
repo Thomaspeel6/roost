@@ -1,6 +1,6 @@
-roost
-roost-hook
-dist/
+/roost
+/roost-hook
+/dist/
 .env
 .context/
 *.test
