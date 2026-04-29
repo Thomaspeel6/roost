@@ -9,38 +9,38 @@ var version = "0.0.1-dev" // overridden at release time via -ldflags "-X main.ve
 
 func main() {
 	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(2)
+		os.Exit(runWake(nil))
 	}
 	switch os.Args[1] {
-	case "init":
-		os.Exit(runInit(os.Args[2:]))
-	case "ls":
-		os.Exit(runLs(os.Args[2:]))
 	case "wake":
 		os.Exit(runWake(os.Args[2:]))
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	case "help", "--help", "-h":
-		printUsage()
+		printUsage(os.Stdout)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", os.Args[1])
-		printUsage()
-		os.Exit(2)
+		// Treat any unknown first arg as a pattern for `roost wake`.
+		// This makes `roost auth-branch` work as shorthand for `roost wake auth-branch`.
+		os.Exit(runWake(os.Args[1:]))
 	}
 }
 
-func printUsage() {
-	fmt.Println(`roost - mission control for parallel Claude Code agents
+func printUsage(w *os.File) {
+	fmt.Fprintln(w, `roost — recap any past Claude Code session
 
 usage:
-  roost init           install Claude Code hooks
-  roost ls             list running agents
-  roost wake <name>    recap of one agent's last task
-  roost version        print version
-  roost help           show this message
+  roost                       recap most recent session in this directory
+  roost <pattern>             recap most recent session matching <pattern>
+  roost wake [pattern]        same as above, explicit
+  roost wake --list           list available sessions, most recent first
+  roost wake -n <num>         show last <num> turns (default 6)
+  roost version               print version
+  roost help                  show this message
+
+how it works:
+  reads Claude Code's per-session transcripts at ~/.claude/projects/.
+  no install, no hooks, no daemon. local only.
 
 privacy:
-  Roost runs locally. Anonymous opt-in usage telemetry is OFF by default.
-  Disable explicitly: touch ~/.roost/telemetry-off`)
+  no network calls. no telemetry.`)
 }
