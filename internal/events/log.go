@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 )
 
 var appendMu sync.Mutex
@@ -21,8 +20,17 @@ func Path() string {
 	return filepath.Join(home, ".roost", "events.jsonl")
 }
 
-// Append writes one event atomically. Safe across processes via flock(2).
-// Errors are returned but the caller (roost-hook) should never block CC on
+// Append writes one event atomically.
+//
+// Concurrency model:
+//   - Within one process: a sync.Mutex serializes writers.
+//   - Across processes: O_APPEND guarantees that each write(2) syscall is
+//     atomic at the file-offset level on POSIX, and Windows similarly
+//     atomically appends with FILE_APPEND_DATA. We marshal each Event to a
+//     single byte slice (json + newline) and write it in one Write call, so
+//     concurrent appends from multiple roost-hook processes never interleave.
+//
+// Errors are returned, but the caller (roost-hook) should never block CC on
 // them — logging to stderr and exiting 0 is the right behavior at the boundary.
 func Append(e Event) error {
 	if e.Schema == 0 {
@@ -33,22 +41,23 @@ func Append(e Event) error {
 		return err
 	}
 
+	buf, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	buf = append(buf, '\n')
+
+	appendMu.Lock()
+	defer appendMu.Unlock()
+
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-
-	appendMu.Lock()
-	defer appendMu.Unlock()
-
-	enc := json.NewEncoder(f)
-	return enc.Encode(e)
+	_, err = f.Write(buf)
+	return err
 }
 
 // Replay returns up to maxEvents most-recent events from the log,

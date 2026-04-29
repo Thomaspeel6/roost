@@ -10,18 +10,23 @@ builds:
     binary: roost
     env:
       - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
     ldflags:
       - -s -w -X main.version=v{{.Version}}
+  - id: roost-hook
+    main: ./cmd/roost-hook
+    binary: roost-hook
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
 
 archives:
   - id: default
+    builds: [roost, roost-hook]
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
@@ -42,6 +47,7 @@ brews:
     license: "MIT"
     install: |
       bin.install "roost"
+      bin.install "roost-hook"
     test: |
       system "#{bin}/roost", "version"
 
