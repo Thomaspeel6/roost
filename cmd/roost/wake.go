@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Thomaspeel6/roost/internal/events"
 )
 
 // transcriptRecord is the minimum we read from a transcript JSONL line.
@@ -45,12 +48,14 @@ var roostProjectsDir = filepath.Join(os.Getenv("HOME"), ".claude", "projects")
 func runWake(args []string) int {
 	// Reorder args so flags appear before positionals. Stdlib flag.Parse stops at
 	// the first non-flag, but real users type `roost kalshi -n 4` half the time.
-	args = reorderFlagsFirst(args, []string{"-n"}, []string{"--list"})
+	args = reorderFlagsFirst(args, []string{"-n"}, []string{"--list", "--live", "--no-live"})
 
 	fs := flag.NewFlagSet("wake", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	list := fs.Bool("list", false, "list available sessions, most recent first")
 	turns := fs.Int("n", 6, "number of turns to show")
+	noLive := fs.Bool("no-live", false, "skip the LLM live recap; always show raw transcript tail")
+	forceLive := fs.Bool("live", false, "force the LLM live recap even if no recent events were observed")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -87,6 +92,22 @@ func runWake(args []string) int {
 	}
 
 	target := matched[0]
+
+	// Decide live mode: explicit flag wins; otherwise auto-detect by checking
+	// the events log for any event matching this session in the last hour.
+	useLive := *forceLive || (!*noLive && sessionIsLive(target))
+
+	if useLive {
+		printed, err := tryLiveRecap(target)
+		if err != nil {
+			// Live recap is best-effort; log to stderr and fall back.
+			fmt.Fprintf(os.Stderr, "live recap unavailable: %v\n", err)
+		}
+		if printed {
+			return 0
+		}
+	}
+
 	if err := printRecap(target, *turns); err != nil {
 		fmt.Fprintf(os.Stderr, "recap: %v\n", err)
 		return 1
@@ -390,6 +411,99 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// sessionIsLive returns true if the events log has any event matching the
+// session's UUID in the last hour. If the events log is missing or empty
+// (user hasn't run `roost init`), this returns false.
+func sessionIsLive(s sessionInfo) bool {
+	if s.SessionID == "" {
+		return false
+	}
+	evs, err := events.Replay(2000)
+	if err != nil || len(evs) == 0 {
+		return false
+	}
+	cutoff := time.Now().UTC().Add(-time.Hour)
+	for i := len(evs) - 1; i >= 0; i-- {
+		e := evs[i]
+		if e.SessionID != s.SessionID {
+			continue
+		}
+		if e.Timestamp.After(cutoff) {
+			return true
+		}
+		break
+	}
+	return false
+}
+
+// tryLiveRecap attempts the LLM-summarized recap. Returns (true, nil) if it
+// printed output, (false, nil) if no API key was configured, and (false, err)
+// for genuine errors. Either of the latter two should fall back to the raw
+// transcript reader.
+func tryLiveRecap(s sessionInfo) (bool, error) {
+	tail, err := transcriptTail(s.Path, 80)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(tail) == "" {
+		return false, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	out, err := liveRecap(ctx, basenameSafe(s.CWD), tail)
+	if err != nil {
+		return false, err
+	}
+	if out == "" {
+		// No API key configured. Caller will fall back.
+		return false, nil
+	}
+
+	branch := s.GitBranch
+	if branch == "" {
+		branch = "(no branch)"
+	}
+	fmt.Printf("session %s — %s — %s\n", shortID(s.SessionID), s.CWD, branch)
+	fmt.Println(strings.Repeat("─", 72))
+	fmt.Println(out)
+	fmt.Println(strings.Repeat("─", 72))
+	return true, nil
+}
+
+// transcriptTail returns the last N lines of the transcript file as a single
+// string suitable for embedding in an LLM prompt. Lines are returned in
+// chronological order.
+func transcriptTail(path string, lines int) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	var all []string
+	for scanner.Scan() {
+		all = append(all, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	if lines > 0 && len(all) > lines {
+		all = all[len(all)-lines:]
+	}
+	return strings.Join(all, "\n"), nil
+}
+
+func basenameSafe(p string) string {
+	if p == "" {
+		return "(unknown)"
+	}
+	return filepath.Base(p)
 }
 
 // reorderFlagsFirst pulls known flags (and their values for valueFlags) to the
