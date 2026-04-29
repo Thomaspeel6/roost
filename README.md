@@ -1,23 +1,40 @@
 # Roost
 
-**Recap any past Claude Code session in 50ms.**
+**Mission control for parallel Claude Code agents.**
 
-You ran a CC session two hours ago in another tab. What was it doing? What was the last thing it tried? What did you ask it to do? Open the tab, scroll, squint — or:
+You're running 4 Claude Code sessions across 4 worktrees. Which one needs you? What was each one doing? Roost answers both, in 50ms.
 
 ```bash
-$ roost                       # most recent session in this directory
-$ roost kalshi                # most recent session matching "kalshi"
-$ roost wake --list           # every session you've ever run, recent first
+$ roost ls                    # live status of every active session
+AGENT          STATUS    LAST EVENT  BRANCH
+auth-branch    blocked   2m ago      main
+ui-cleanup     running   12s ago     feature/ui
+docs-sweep     done      1m ago      docs/sweep
+infra-bump     idle      8m ago      main
+
+$ roost wake auth-branch      # 4-line recap of what that one was doing
+WAS DOING:    Refactoring login middleware to use the new token format.
+LAST FINISHED: Updated session_test.go and ran the suite (12/12 passing).
+STATUS:       blocked — waiting on permission to run `git push`.
+NEXT:         Approve the push, or revise the commit message.
 ```
 
 ## How it works
 
-Claude Code already writes a JSONL transcript for every session at `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl`. Roost reads them. That's it.
+Two layers, both local:
 
-- **No install.** No hooks. No daemon. No background process.
-- **Works on every past session**, not just future ones.
-- **No network calls.** No telemetry. Local only.
-- **One static Go binary, ~3MB.**
+1. **Transcript layer (no install).** Claude Code writes a JSONL transcript for every session at `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl`. Roost reads them. `roost wake [pattern]` works on every CC session you've ever run — no setup required.
+
+2. **Live layer (one-time install).** `roost init` registers six lifecycle hooks (SessionStart, PreToolUse, PostToolUse, UserPromptSubmit, Stop, Notification) that append events to `~/.roost/events.jsonl`. `roost ls` reads that log to show real-time BLOCKED / RUNNING / DONE / IDLE status.
+
+The classifier:
+
+```
+Notification(notification_type=idle_prompt)        → BLOCKED
+Stop                                               → DONE
+PreToolUse / PostToolUse / SessionStart / etc      → RUNNING
+No event in 5 min                                  → IDLE
+```
 
 ## Install
 
@@ -25,22 +42,18 @@ Claude Code already writes a JSONL transcript for every session at `~/.claude/pr
 
 ```bash
 brew install Thomaspeel6/tap/roost
+roost init      # one-time, installs CC hooks
 ```
 
 ### Direct binary download
 
-Pick a release from [github.com/Thomaspeel6/roost/releases](https://github.com/Thomaspeel6/roost/releases), unpack, drop in `/usr/local/bin/`:
-
-```bash
-# macOS arm64 example
-curl -sSL https://github.com/Thomaspeel6/roost/releases/latest/download/roost_0.1.0_darwin_arm64.tar.gz | tar xz
-sudo mv roost /usr/local/bin/
-```
+[github.com/Thomaspeel6/roost/releases](https://github.com/Thomaspeel6/roost/releases) — grab a tarball, drop `roost` and `roost-hook` into `/usr/local/bin/`.
 
 ### From source
 
 ```bash
 go install github.com/Thomaspeel6/roost/cmd/roost@latest
+go install github.com/Thomaspeel6/roost/cmd/roost-hook@latest
 ```
 
 ## Usage
@@ -48,9 +61,15 @@ go install github.com/Thomaspeel6/roost/cmd/roost@latest
 ```
 roost                       recap most recent session in this directory
 roost <pattern>             recap most recent session matching <pattern>
-roost wake [pattern]        same as above, explicit
-roost wake --list           list available sessions, most recent first
+roost ls                    live status table for currently-active sessions
+roost ls --all              show all sessions including idle ones
+roost wake [pattern]        same as `roost <pattern>`, explicit
+roost wake --list           list every transcript on disk, recent first
 roost wake -n <num>         show last <num> turns (default 6)
+roost wake --live           force the LLM live recap
+roost wake --no-live        always raw transcript, never LLM
+roost init                  install Claude Code hooks (required for `ls`)
+roost init --uninstall      remove the hooks
 roost version               print version
 roost help                  show this message
 ```
@@ -62,16 +81,25 @@ roost                              # current directory
 roost auth-branch                  # any session whose worktree path matches
 roost moveo                        # any session in a moveo project
 roost wake b09b381e                # session UUID prefix
-roost wake -n 20                   # show last 20 turns
 ```
 
-## Why
+## LLM live recap (optional)
 
-Running 4 Claude Code agents in parallel is great until you switch back to one and have to scroll 200 lines to remember what it was doing. Roost gives you the recap in one command.
+If `ANTHROPIC_API_KEY` is set in your environment and a session has events in the last hour, `roost wake` prefers a Claude Haiku 4.5 call to produce the structured 4-line answer (WAS DOING / LAST FINISHED / STATUS / NEXT). Without the key, you get the raw transcript tail.
+
+Skip the LLM call: `--no-live`. Force it: `--live`. Costs about half a cent per recap.
+
+## Privacy
+
+- Roost runs entirely on your machine.
+- The only network call is the optional `roost wake` LLM recap, which sends your transcript tail to Anthropic's API. Disable with `--no-live` or by unsetting `ANTHROPIC_API_KEY`.
+- Zero telemetry. No PostHog, no pings, no opt-out needed because there's nothing to opt out of.
 
 ## Status
 
-v0. Single command. Read-only. Works for the author and at least 2 other Claude Code power users. If you'd find this useful, [open an issue](https://github.com/Thomaspeel6/roost/issues) — feedback shapes v0.1.
+v0.2. Two commands (`ls`, `wake`) plus `init`. Read-only against your CC sessions; the only write Roost makes is to `~/.roost/events.jsonl` and `~/.claude/settings.json` (only after `roost init`).
+
+If you'd find this useful, [open an issue](https://github.com/Thomaspeel6/roost/issues) — feedback shapes v0.3.
 
 ## License
 
