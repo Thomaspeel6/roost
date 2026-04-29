@@ -19,16 +19,29 @@ Claude Code already writes a JSONL transcript for every session at `~/.claude/pr
 - **No network calls.** No telemetry. Local only.
 - **One static Go binary, ~3MB.**
 
-## Install (early access)
+## Install
+
+### Homebrew (macOS / Linux)
 
 ```bash
-git clone https://github.com/Thomaspeel6/roost
-cd roost
-go build -o roost ./cmd/roost
+brew install Thomaspeel6/tap/roost
+```
+
+### Direct binary download
+
+Pick a release from [github.com/Thomaspeel6/roost/releases](https://github.com/Thomaspeel6/roost/releases), unpack, drop in `/usr/local/bin/`:
+
+```bash
+# macOS arm64 example
+curl -sSL https://github.com/Thomaspeel6/roost/releases/latest/download/roost_0.1.0_darwin_arm64.tar.gz | tar xz
 sudo mv roost /usr/local/bin/
 ```
 
-(Homebrew tap when v0.1 ships.)
+### From source
+
+```bash
+go install github.com/Thomaspeel6/roost/cmd/roost@latest
+```
 
 ## Usage
 
