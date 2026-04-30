@@ -10,8 +10,47 @@ import (
 
 func TestAgentTable_EmptyHelpfulMessage(t *testing.T) {
 	got := AgentTable(nil, true)
-	if !strings.Contains(got, "No agents") {
-		t.Errorf("empty state should hint at running CC, got:\n%s", got)
+	if !strings.Contains(got, "No active sessions") {
+		t.Errorf("empty state should hint at --all, got:\n%s", got)
+	}
+}
+
+func TestAgentTable_DisambiguatesDuplicateNames(t *testing.T) {
+	now := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
+	agents := []state.Agent{
+		{Name: "moveo.ai", SessionID: "aaaaaaaa-1111", GitBranch: "main", Status: state.Running, LastEvent: now},
+		{Name: "moveo.ai", SessionID: "bbbbbbbb-2222", GitBranch: "feature/x", Status: state.Idle, LastEvent: now},
+	}
+	got := AgentTable(agents, true)
+	if !strings.Contains(got, "moveo.ai (main)") {
+		t.Errorf("duplicate names should be disambiguated by branch, got:\n%s", got)
+	}
+	if !strings.Contains(got, "moveo.ai (feature/x)") {
+		t.Errorf("duplicate names should be disambiguated by branch, got:\n%s", got)
+	}
+}
+
+func TestAgentTable_NoSuffixWhenUnique(t *testing.T) {
+	now := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
+	agents := []state.Agent{
+		{Name: "moveo.ai", SessionID: "aaaaaaaa-1111", GitBranch: "main", Status: state.Running, LastEvent: now},
+		{Name: "kalshi", SessionID: "bbbbbbbb-2222", GitBranch: "main", Status: state.Idle, LastEvent: now},
+	}
+	got := AgentTable(agents, true)
+	if strings.Contains(got, "moveo.ai (main)") {
+		t.Errorf("unique names should NOT get a suffix, got:\n%s", got)
+	}
+}
+
+func TestAgentTable_FallsBackToSessionIDWhenBranchMissing(t *testing.T) {
+	now := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
+	agents := []state.Agent{
+		{Name: "moveo.ai", SessionID: "aaaaaaaa-1111", Status: state.Running, LastEvent: now},
+		{Name: "moveo.ai", SessionID: "bbbbbbbb-2222", Status: state.Idle, LastEvent: now},
+	}
+	got := AgentTable(agents, true)
+	if !strings.Contains(got, "(aaaaaaaa)") || !strings.Contains(got, "(bbbbbbbb)") {
+		t.Errorf("with no branch, should fall back to short session id, got:\n%s", got)
 	}
 }
 

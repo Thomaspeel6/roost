@@ -13,14 +13,20 @@ import (
 
 // AgentTable renders agents as a sorted, color-coded table. If noColor is
 // true the output has no ANSI codes (suitable for piping or NO_COLOR envs).
+//
+// When multiple agents share a Name (two CC sessions in the same project
+// directory), each duplicate gets a session-id short prefix appended in
+// parentheses so they're distinguishable in the table.
 func AgentTable(agents []state.Agent, noColor bool) string {
 	if len(agents) == 0 {
-		return "No agents seen yet. Start a Claude Code session, then run `roost ls` again.\n"
+		return "No active sessions. Try `roost ls --all` to see everything ever seen.\n"
 	}
 
+	displayNames := disambiguateNames(agents)
+
 	rows := make([][]string, 0, len(agents))
-	for _, a := range agents {
-		rows = append(rows, []string{a.Name, a.Status.String(), since(a.LastEvent), branchOrDash(a.GitBranch)})
+	for i, a := range agents {
+		rows = append(rows, []string{displayNames[i], a.Status.String(), since(a.LastEvent), branchOrDash(a.GitBranch)})
 	}
 
 	t := table.New().
@@ -45,14 +51,49 @@ func AgentTable(agents []state.Agent, noColor bool) string {
 func statusColor(s state.Status) lipgloss.Style {
 	switch s {
 	case state.Blocked:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // red
-	case state.Done:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("82")) // green
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // red — needs you NOW
+	case state.Running:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // amber — actively working
 	case state.Idle:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")) // gray
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("82")) // green — ready, waiting for prompt
+	case state.Stale:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")) // gray — forgotten
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // amber for running
+		return lipgloss.NewStyle()
 	}
+}
+
+// disambiguateNames returns one display string per agent; identical names get
+// a short suffix (session-id prefix or branch name) so the table is readable.
+func disambiguateNames(agents []state.Agent) []string {
+	counts := map[string]int{}
+	for _, a := range agents {
+		counts[a.Name]++
+	}
+	out := make([]string, len(agents))
+	for i, a := range agents {
+		if counts[a.Name] <= 1 {
+			out[i] = a.Name
+			continue
+		}
+		// Prefer branch as discriminator if non-empty and not "-"; else use
+		// short session id; else fall back to bare name.
+		discriminator := ""
+		if a.GitBranch != "" {
+			discriminator = a.GitBranch
+		} else if a.SessionID != "" {
+			discriminator = a.SessionID
+			if len(discriminator) > 8 {
+				discriminator = discriminator[:8]
+			}
+		}
+		if discriminator == "" {
+			out[i] = a.Name
+		} else {
+			out[i] = a.Name + " (" + discriminator + ")"
+		}
+	}
+	return out
 }
 
 func since(t time.Time) string {

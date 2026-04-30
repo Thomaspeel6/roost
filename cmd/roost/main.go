@@ -35,8 +35,9 @@ func printUsage(w *os.File) {
 usage:
   roost                       recap most recent session in this directory
   roost <pattern>             recap most recent session matching <pattern>
-  roost ls                    live status table for currently-active sessions
-  roost ls --all              show all sessions including idle ones
+  roost ls                    live status table for active sessions
+  roost ls --watch            auto-refresh every second
+  roost ls --all              include sessions that have gone stale
   roost wake [pattern]        same as `+"`roost <pattern>`"+`, explicit
   roost wake --list           list every transcript on disk, recent first
   roost wake -n <num>         show last <num> turns (default 6)
