@@ -12,8 +12,8 @@ const SchemaVersion = 1
 // reduces a stream of these into per-session Agent state.
 type Event struct {
 	Schema       int       `json:"schema"`
-	Hook         string    `json:"hook"`         // SessionStart, PreToolUse, PostToolUse, UserPromptSubmit, Stop, Notification
-	AgentID      string    `json:"agent_id"`     // basename(cwd) by default
+	Hook         string    `json:"hook"`     // SessionStart, PreToolUse, PostToolUse, UserPromptSubmit, Stop, Notification
+	AgentID      string    `json:"agent_id"` // basename(cwd) by default
 	RepoRoot     string    `json:"repo_root,omitempty"`
 	WorktreePath string    `json:"worktree_path,omitempty"`
 	SessionID    string    `json:"session_id,omitempty"`

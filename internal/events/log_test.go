@@ -118,3 +118,65 @@ func TestReplay_RespectsMaxEvents(t *testing.T) {
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
+
+func TestReplay_TailOfLargeFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	t.Setenv("ROOST_EVENTS_PATH", path)
+
+	// Build a file larger than replayTailBytes: pad events with a fat agent id.
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := make([]byte, 4096)
+	for i := range pad {
+		pad[i] = 'x'
+	}
+	line := `{"schema":1,"hook":"PostToolUse","agent_id":"` + string(pad) + `","ts":"2026-07-20T10:00:00Z"}` + "\n"
+	for written := 0; written < replayTailBytes+1024*1024; written += len(line) {
+		if _, err := f.WriteString(line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last := `{"schema":1,"hook":"Stop","agent_id":"final","ts":"2026-07-20T11:00:00Z"}` + "\n"
+	if _, err := f.WriteString(last); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	got, err := Replay(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 {
+		t.Fatal("expected events from the tail")
+	}
+	if got[len(got)-1].AgentID != "final" {
+		t.Errorf("last event should be the final append, got %q", got[len(got)-1].AgentID)
+	}
+}
+
+func TestAppend_RotatesHugeLog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	t.Setenv("ROOST_EVENTS_PATH", path)
+
+	// Pre-size the log past the rotation threshold.
+	if err := os.WriteFile(path, make([]byte, maxLogBytes+1), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Append(Event{Hook: "Stop", AgentID: "x", Timestamp: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Size() > 4096 {
+		t.Errorf("log should have been rotated to a fresh file, size=%d", st.Size())
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Errorf("rotated file should exist: %v", err)
+	}
+}
