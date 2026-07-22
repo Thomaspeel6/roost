@@ -8,12 +8,12 @@ import "time"
 // Semantics (matches what CC's hooks actually fire, validated empirically
 // against ~400 events):
 //
-//   Blocked — Notification(permission_prompt) was the most recent state.
-//             Claude is asking for explicit approval. You should look at it.
-//   Running — A tool is mid-flight or Claude is processing output. Don't bother it.
-//   Idle    — Stop or Notification(idle_prompt) — turn finished, available
-//             for your next prompt. Most sessions live here.
-//   Stale   — No event in the staleness window; probably forgotten.
+//	Blocked — Notification(permission_prompt) was the most recent state.
+//	          Claude is asking for explicit approval. You should look at it.
+//	Running — A tool is mid-flight or Claude is processing output. Don't bother it.
+//	Idle    — Stop or Notification(idle_prompt) — turn finished, available
+//	          for your next prompt. Most sessions live here.
+//	Stale   — No event in the staleness window; probably forgotten.
 type Status int
 
 const (

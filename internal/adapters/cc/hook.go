@@ -3,6 +3,7 @@
 package cc
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -78,8 +79,13 @@ func repoMetadata(cwd string) (repoRoot, branch string) {
 	return repoRoot, branch
 }
 
+// runGit shells out to git with a hard timeout. roost-hook runs on every CC
+// lifecycle event, so a git that hangs (network filesystem, fsmonitor stall)
+// must never block Claude Code until CC's own hook timeout kicks in.
 func runGit(cwd string, args ...string) string {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = cwd
 	out, err := cmd.Output()
 	if err != nil {

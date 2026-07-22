@@ -17,11 +17,11 @@ const StaleAfter = 5 * time.Minute
 //
 // Decision order, applied to the LAST event seen for each session:
 //
-//   Notification(notification_type=permission_prompt) → Blocked
-//   Notification(notification_type=idle_prompt)       → Idle
-//   Stop                                              → Idle
-//   Pre/PostToolUse / UserPromptSubmit / SessionStart → Running
-//   then: Running with last event > StaleAfter ago    → Stale
+//	Notification(notification_type=permission_prompt) → Blocked
+//	Notification(notification_type=idle_prompt)       → Idle
+//	Stop                                              → Idle
+//	Pre/PostToolUse / UserPromptSubmit / SessionStart → Running
+//	then: Running with last event > StaleAfter ago    → Stale
 //
 // Agents are returned sorted Blocked > Running > Idle > Stale, then
 // most-recent-first within each bucket.

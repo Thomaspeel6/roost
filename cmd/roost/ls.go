@@ -46,14 +46,11 @@ func renderOnce(all, noColor bool, maxEvents int, emitErrors bool) int {
 	agents := state.Classify(evs, now)
 
 	if !all {
+		// "Active" means: fired an event in the recent window, whatever the
+		// status. Without this, sessions that ended with Stop stay Idle
+		// forever and ghost sessions from days ago clutter the table.
 		filtered := agents[:0]
 		for _, a := range agents {
-			// Always show non-stale agents.
-			if a.Status != state.Stale {
-				filtered = append(filtered, a)
-				continue
-			}
-			// Only show stale agents if they fired an event in the recent window.
 			if now.Sub(a.LastEvent) <= defaultRecentWindow {
 				filtered = append(filtered, a)
 			}

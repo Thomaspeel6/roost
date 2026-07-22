@@ -114,9 +114,8 @@ func branchOrDash(b string) string {
 	if b == "" {
 		return "-"
 	}
-	if len(b) > 30 {
-		return b[:27] + "..."
+	if r := []rune(b); len(r) > 30 {
+		return string(r[:27]) + "..."
 	}
 	return b
 }
-
