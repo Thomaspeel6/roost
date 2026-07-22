@@ -49,8 +49,9 @@ usage:
 how it works:
   reads Claude Code's per-session transcripts at ~/.claude/projects/.
   with `+"`roost init`"+`, additionally watches lifecycle hooks for live status.
-  no daemon. no network calls (unless ANTHROPIC_API_KEY is set, then `+"`wake`"+`
-  uses Claude Haiku for a structured 4-line recap of live sessions).
+  no daemon. `+"`wake`"+` asks Claude for a structured recap via your existing
+  `+"`claude`"+` CLI login (no key required), falling back to ANTHROPIC_API_KEY.
+  without either, you get the raw transcript tail (same as --no-live).
 
 privacy:
   no telemetry. local only.`)

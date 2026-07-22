@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Thomaspeel6/roost/internal/events"
+	"github.com/Thomaspeel6/roost/internal/state"
 )
 
 // transcriptRecord is the minimum we read from a transcript JSONL line.
@@ -43,7 +44,12 @@ type sessionInfo struct {
 }
 
 // roostProjectsDir is overridable for tests. CC writes transcripts here.
-var roostProjectsDir = filepath.Join(os.Getenv("HOME"), ".claude", "projects")
+var roostProjectsDir = defaultProjectsDir()
+
+func defaultProjectsDir() string {
+	home, _ := os.UserHomeDir() // works on Windows too, unlike $HOME
+	return filepath.Join(home, ".claude", "projects")
+}
 
 func runWake(args []string) int {
 	// Reorder args so flags appear before positionals. Stdlib flag.Parse stops at
@@ -93,9 +99,10 @@ func runWake(args []string) int {
 
 	target := matched[0]
 
-	// Decide live mode: explicit flag wins; otherwise auto-detect by checking
-	// the events log for any event matching this session in the last hour.
-	useLive := *forceLive || (!*noLive && sessionIsLive(target))
+	// Prefer the LLM recap whenever an engine is available (API key, or the
+	// claude CLI riding the user's existing Claude Code login). --no-live
+	// skips it; --live forces the attempt even if detection says otherwise.
+	useLive := !*noLive && (*forceLive || recapAvailable())
 
 	if useLive {
 		printed, err := tryLiveRecap(target)
@@ -111,6 +118,9 @@ func runWake(args []string) int {
 	if err := printRecap(target, *turns); err != nil {
 		fmt.Fprintf(os.Stderr, "recap: %v\n", err)
 		return 1
+	}
+	if !*noLive && !recapAvailable() {
+		fmt.Fprintln(os.Stderr, "tip: install the `claude` CLI or set ANTHROPIC_API_KEY for a smart 5-line recap")
 	}
 	return 0
 }
@@ -410,93 +420,73 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "..."
+	// Rune-safe: never split a multi-byte character mid-sequence.
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
 }
 
-// sessionIsLive returns true if the events log has any event matching the
-// session's UUID in the last hour. If the events log is missing or empty
-// (user hasn't run `roost init`), this returns false.
-func sessionIsLive(s sessionInfo) bool {
+// hookStatus classifies the session from the live events log (installed via
+// `roost init`). Returns "" when hooks aren't installed or the session has
+// never fired an event — the recap prompt then marks status as unknown.
+func hookStatus(s sessionInfo) string {
 	if s.SessionID == "" {
-		return false
+		return ""
 	}
-	evs, err := events.Replay(2000)
+	evs, err := events.Replay(5000)
 	if err != nil || len(evs) == 0 {
-		return false
+		return ""
 	}
-	cutoff := time.Now().UTC().Add(-time.Hour)
-	for i := len(evs) - 1; i >= 0; i-- {
-		e := evs[i]
-		if e.SessionID != s.SessionID {
-			continue
+	agents := state.Classify(evs, time.Now().UTC())
+	for _, a := range agents {
+		if a.SessionID == s.SessionID {
+			return fmt.Sprintf("%s (last hook event %s)", a.Status, humanizeAgo(time.Since(a.LastEvent)))
 		}
-		if e.Timestamp.After(cutoff) {
-			return true
-		}
-		break
 	}
-	return false
+	return ""
 }
 
 // tryLiveRecap attempts the LLM-summarized recap. Returns (true, nil) if it
-// printed output, (false, nil) if no API key was configured, and (false, err)
-// for genuine errors. Either of the latter two should fall back to the raw
-// transcript reader.
+// printed output, (false, nil) if no recap engine was available, and
+// (false, err) for genuine errors. Either of the latter two should fall back
+// to the raw transcript reader.
 func tryLiveRecap(s sessionInfo) (bool, error) {
-	tail, err := transcriptTail(s.Path, 80)
+	digest, err := digestTranscript(s.Path, 14000)
 	if err != nil {
 		return false, err
 	}
-	if strings.TrimSpace(tail) == "" {
+	if strings.TrimSpace(digest) == "" {
 		return false, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// Generous timeout: the claude-CLI engine pays Claude Code startup cost.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-
-	out, err := liveRecap(ctx, basenameSafe(s.CWD), tail)
-	if err != nil {
-		return false, err
-	}
-	if out == "" {
-		// No API key configured. Caller will fall back.
-		return false, nil
-	}
 
 	branch := s.GitBranch
 	if branch == "" {
 		branch = "(no branch)"
 	}
+	out, err := liveRecap(ctx, recapMeta{
+		Name:   basenameSafe(s.CWD),
+		CWD:    s.CWD,
+		Branch: branch,
+		Status: hookStatus(s),
+	}, digest)
+	if err != nil {
+		return false, err
+	}
+	if out == "" {
+		return false, nil
+	}
+
 	fmt.Printf("session %s — %s — %s\n", shortID(s.SessionID), s.CWD, branch)
 	fmt.Println(strings.Repeat("─", 72))
 	fmt.Println(out)
 	fmt.Println(strings.Repeat("─", 72))
 	return true, nil
-}
-
-// transcriptTail returns the last N lines of the transcript file as a single
-// string suitable for embedding in an LLM prompt. Lines are returned in
-// chronological order.
-func transcriptTail(path string, lines int) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	var all []string
-	for scanner.Scan() {
-		all = append(all, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-	if lines > 0 && len(all) > lines {
-		all = all[len(all)-lines:]
-	}
-	return strings.Join(all, "\n"), nil
 }
 
 func basenameSafe(p string) string {
@@ -510,15 +500,19 @@ func basenameSafe(p string) string {
 // front of the arg list so stdlib flag.Parse processes them. Unknown args
 // remain in their original relative order as positionals.
 func reorderFlagsFirst(args []string, valueFlags, boolFlags []string) []string {
+	// Accept both -flag and --flag spellings, but never the bare name:
+	// `roost wake n` must treat "n" as a search pattern, not a flag.
 	isValueFlag := map[string]bool{}
 	for _, f := range valueFlags {
-		isValueFlag[f] = true
-		isValueFlag[f[1:]] = true   // also accept "n" form internally
-		isValueFlag["-"+f[1:]] = true
+		name := strings.TrimLeft(f, "-")
+		isValueFlag["-"+name] = true
+		isValueFlag["--"+name] = true
 	}
 	isBoolFlag := map[string]bool{}
 	for _, f := range boolFlags {
-		isBoolFlag[f] = true
+		name := strings.TrimLeft(f, "-")
+		isBoolFlag["-"+name] = true
+		isBoolFlag["--"+name] = true
 	}
 
 	flags := []string{}

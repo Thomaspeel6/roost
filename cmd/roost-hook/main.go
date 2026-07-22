@@ -15,6 +15,11 @@ import (
 )
 
 func main() {
+	// Roost's own `claude -p` recap helper sets ROOST_SUPPRESS so its
+	// lifecycle events don't pollute the status table.
+	if os.Getenv("ROOST_SUPPRESS") != "" {
+		return
+	}
 	e, err := cc.Parse(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "roost-hook: parse: %v\n", err)

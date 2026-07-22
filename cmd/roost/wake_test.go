@@ -128,6 +128,8 @@ func TestReorderFlagsFirst(t *testing.T) {
 		{"bool after positional", []string{"foo", "--list"}, []string{"--list", "foo"}},
 		{"no flags", []string{"kalshi", "auth"}, []string{"kalshi", "auth"}},
 		{"equals form", []string{"foo", "-n=5"}, []string{"-n=5", "foo"}},
+		{"bare n is a pattern, not a flag", []string{"n"}, []string{"n"}},
+		{"double-dash value flag", []string{"kalshi", "--n", "4"}, []string{"--n", "4", "kalshi"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -153,8 +155,8 @@ func TestFilterSessions(t *testing.T) {
 		{SessionID: "fed09876", CWD: "/Users/x/work/ui", GitBranch: "main"},
 	}
 	cases := []struct {
-		pattern  string
-		wantIDs  []string
+		pattern string
+		wantIDs []string
 	}{
 		{"auth", []string{"abc12345", "def67890"}}, // matches cwd OR branch
 		{"billing", []string{"def67890"}},
@@ -272,7 +274,7 @@ func TestHumanizeAgo(t *testing.T) {
 }
 
 // mustNow returns time.Now() — wrapped to make Chtimes call sites tidy.
-func mustNow(t *testing.T) (time.Time) {
+func mustNow(t *testing.T) time.Time {
 	t.Helper()
 	return time.Now()
 }
