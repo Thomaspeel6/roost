@@ -44,7 +44,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/Thomaspeel6/roost"
     description: "Recap any past Claude Code session in 50ms"
-    license: "MIT"
+    license: "GPL-3.0-only"
     install: |
       bin.install "roost"
       bin.install "roost-hook"
